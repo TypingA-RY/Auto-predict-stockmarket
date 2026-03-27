@@ -1,0 +1,6 @@
+customtkinter
+akshare
+mplfinance
+matplotlib
+pandas
+numpy
