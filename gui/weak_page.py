@@ -160,11 +160,24 @@ class WeakPage(PredictPage):
 
             win_rate, avg_ret = self._calc_winrate(df)
 
+            pct  = close.pct_change() * 100
+            chg3 = [round(pct.iloc[-i], 2) if len(pct) >= i else None for i in range(1, 4)]
+
+            try:
+                import akshare as ak
+                info_df = ak.stock_individual_info_em(stock=code)
+                info    = dict(zip(info_df.iloc[:, 0], info_df.iloc[:, 1]))
+                sector  = str(info.get("行业", "—"))
+            except Exception:
+                sector = "—"
+
             return {
                 "code":        code,
                 "name":        name,
                 "price":       cur,
                 "score":       score,
+                "chg3":        chg3,
+                "sector":      sector,
                 "win_rate":    win_rate,
                 "exp_return":  avg_ret,
                 "stop_loss":   stop_loss,
@@ -194,20 +207,7 @@ class WeakPage(PredictPage):
             text_color=RED, font=ctk.CTkFont(size=11)
         ).pack(pady=(8, 2))
 
-        hdr = ctk.CTkFrame(self.content, fg_color=("gray25", "gray20"), corner_radius=4)
-        hdr.pack(fill="x", padx=10, pady=(4, 0))
-        for i, w in enumerate(WIDTHS):
-            hdr.columnconfigure(i, weight=1 if w == 1 else 0, minsize=max(w, 10))
-        for i, (col, w) in enumerate(zip(COLS, WIDTHS)):
-            ctk.CTkLabel(hdr, text=col, text_color=GRAY,
-                         font=ctk.CTkFont(size=11, weight="bold"),
-                         anchor="w").grid(row=0, column=i, padx=6, pady=5, sticky="w")
-
-        scroll = ctk.CTkScrollableFrame(self.content, fg_color="transparent")
-        scroll.pack(fill="both", expand=True, padx=10, pady=(2, 8))
-        for i, w in enumerate(WIDTHS):
-            scroll.columnconfigure(i, weight=1 if w == 1 else 0, minsize=max(w, 10))
-
+        _, scroll = self._build_scroll_table(self.content)
         for rank, item in enumerate(bottom10, 1):
             self._add_row_weak(scroll, rank, item)
 
@@ -219,7 +219,6 @@ class WeakPage(PredictPage):
             row_f.columnconfigure(i, weight=1 if w == 1 else 0, minsize=max(w, 10))
 
         s  = item["score"]
-        # 弱势股：分越低越红
         sc = RED if s <= 3 else (YELLOW if s <= 5 else "white")
         rr = item["rr"]
 
@@ -232,17 +231,29 @@ class WeakPage(PredictPage):
                     RED if wr else GRAY)
         er_color = GREEN if er and er > 0 else (RED if er and er < 0 else GRAY)
 
+        def chg_fmt(v):
+            if v is None: return "—", GRAY
+            return f"{v:+.2f}%", (GREEN if v > 0 else RED if v < 0 else GRAY)
+
+        c1, c1c = chg_fmt(item.get("chg3", [None, None, None])[0])
+        c2, c2c = chg_fmt(item.get("chg3", [None, None, None])[1])
+        c3, c3c = chg_fmt(item.get("chg3", [None, None, None])[2])
+
         cells = [
             (str(rank),                     "white"),
             (item["code"],                  BLUE),
             (item["name"],                  "white"),
             (f"¥{item['price']:.2f}",       "white"),
+            (c1,                            c1c),
+            (c2,                            c2c),
+            (c3,                            c3c),
             (f"{s} 分",                     sc),
             (wr_txt,                        wr_color),
             (er_txt,                        er_color),
             (f"¥{item['stop_loss']:.2f}",   RED),
             (f"¥{item['take_profit']:.2f}", GREEN),
             (f"{rr}:1",                     GREEN if rr >= 2.5 else YELLOW),
+            (item.get("sector", "—"),       YELLOW),
             (item["reasons"],               GRAY),
         ]
         for col, (text, color) in enumerate(cells):

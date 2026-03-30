@@ -47,10 +47,10 @@ BLUECHIP_POOL = [
     ("002466","天齐锂业"),("688223","晶科能源"),("300274","阳光电源"),
 ]
 
-COLS   = ["排名", "代码",  "名称",  "现价",  "评分",
-          "胜率",  "预期收益", "止损价", "止盈价", "盈亏比", "触发信号"]
-WIDTHS = [40,     75,      95,     75,     55,
-          60,     75,      75,     75,     55,     1]
+COLS   = ["排名", "代码",  "名称",  "现价",  "D-1",  "D-2",  "D-3",  "评分",
+          "胜率",  "预期收益", "止损价", "止盈价", "盈亏比", "所属板块", "触发信号"]
+WIDTHS = [40,     75,      95,     75,     60,     60,     60,     55,
+          60,     75,      75,     75,     55,     100,    280]
 
 
 class PredictPage(ctk.CTkFrame):
@@ -71,16 +71,23 @@ class PredictPage(ctk.CTkFrame):
                      font=ctk.CTkFont(size=14, weight="bold"),
                      text_color=BLUE).pack(side="left", padx=(12, 12))
 
-        ctk.CTkLabel(ctrl, text="候选池:").pack(side="left", padx=(0, 4))
+        ctk.CTkLabel(ctrl, text="策略:").pack(side="left", padx=(0, 4))
+        self.strategy_var = tk.StringVar(value="追势")
+        ctk.CTkOptionMenu(ctrl, variable=self.strategy_var,
+                          values=["追势", "蓝筹过滤超涨", "均值回归", "板块轮动"],
+                          width=120,
+                          command=self._on_strategy).pack(side="left", padx=4)
+
+        ctk.CTkLabel(ctrl, text="候选池:").pack(side="left", padx=(8, 4))
         self.pool_var = tk.StringVar(value="热门榜+蓝筹")
         ctk.CTkOptionMenu(ctrl, variable=self.pool_var,
                           values=["热门榜+蓝筹", "仅热门榜", "仅蓝筹"],
                           width=130).pack(side="left", padx=4)
 
-        ctk.CTkLabel(ctrl, text="最低评分:").pack(side="left", padx=(12, 4))
+        ctk.CTkLabel(ctrl, text="最低评分:").pack(side="left", padx=(8, 4))
         self.score_var = tk.StringVar(value="7")
         ctk.CTkOptionMenu(ctrl, variable=self.score_var,
-                          values=["7", "8", "9", "10"],
+                          values=["5", "6", "7", "8", "9", "10"],
                           width=60).pack(side="left", padx=4)
 
         ctk.CTkLabel(ctrl, text="数据年数:").pack(side="left", padx=(12, 4))
@@ -88,6 +95,12 @@ class PredictPage(ctk.CTkFrame):
         ctk.CTkOptionMenu(ctrl, variable=self.years_var,
                           values=["1", "2", "3"],
                           width=60).pack(side="left", padx=4)
+
+        ctk.CTkLabel(ctrl, text="大盘基准:").pack(side="left", padx=(12, 4))
+        self.index_var = tk.StringVar(value="沪深300")
+        ctk.CTkOptionMenu(ctrl, variable=self.index_var,
+                          values=["沪深300", "上证指数", "深证成指", "创业板指", "中证500", "中证1000"],
+                          width=100).pack(side="left", padx=4)
 
         ctk.CTkButton(ctrl, text="开始预测", width=90,
                       command=self._start).pack(side="left", padx=12)
@@ -137,10 +150,34 @@ class PredictPage(ctk.CTkFrame):
         ctk.CTkLabel(self.news_scroll, text="点击上方股票查看最新资讯",
                      text_color="gray50").pack(pady=20)
 
+    # 指数名称 → AkShare symbol 映射
+    _INDEX_MAP = {
+        "沪深300":  "sh000300",
+        "上证指数":  "sh000001",
+        "深证成指":  "sz399001",
+        "创业板指":  "sz399006",
+        "中证500":  "sh000905",
+        "中证1000": "sh000852",
+    }
+
+    def _on_strategy(self, strategy):
+        """切换策略时自动调整候选池和评分默认值"""
+        defaults = {
+            "追势":       ("热门榜+蓝筹", "7"),
+            "蓝筹过滤超涨": ("仅蓝筹",      "6"),
+            "均值回归":    ("热门榜+蓝筹", "5"),
+            "板块轮动":    ("热门榜+蓝筹", "6"),
+        }
+        pool, score = defaults.get(strategy, ("热门榜+蓝筹", "7"))
+        self.pool_var.set(pool)
+        self.score_var.set(score)
+
     # ── 大盘趋势 ─────────────────────────────────────────────────────────
     def _get_market_trend(self):
+        index_name = self.index_var.get()
+        symbol     = self._INDEX_MAP.get(index_name, "sh000300")
         try:
-            df    = ak.stock_zh_index_daily(symbol="sh000300")
+            df    = ak.stock_zh_index_daily(symbol=symbol)
             df["date"] = pd.to_datetime(df["date"])
             df    = df.set_index("date").sort_index().tail(120)
             close = df["close"].astype(float)
@@ -149,11 +186,11 @@ class PredictPage(ctk.CTkFrame):
             cur   = close.iloc[-1]
             chg   = (cur - close.iloc[-2]) / close.iloc[-2] * 100
             uptrend = (cur > ma20) and (ma5 > ma20)
-            desc  = (f"沪深300 {cur:.0f}  {chg:+.2f}%  "
+            desc  = (f"{index_name} {cur:.0f}  {chg:+.2f}%  "
                      f"{'✅ 上升趋势' if uptrend else '⚠️ 弱势行情'}")
             return uptrend, desc
-        except Exception as e:
-            return True, f"大盘数据暂不可用，不过滤"
+        except Exception:
+            return True, "大盘数据暂不可用，不过滤"
 
     # ── 候选池 ───────────────────────────────────────────────────────────
     def _get_candidates(self, pool: str):
@@ -194,17 +231,34 @@ class PredictPage(ctk.CTkFrame):
                 text=market_desc, text_color=mc))
 
             self._set_prog("获取候选股列表…", 0.08)
-            pool       = self.pool_var.get()
-            min_score  = int(self.score_var.get())
-            hist_days  = int(self.years_var.get()) * 365
+            pool      = self.pool_var.get()
+            min_score = int(self.score_var.get())
+            hist_days = int(self.years_var.get()) * 365
+            strategy  = self.strategy_var.get()
             candidates = self._get_candidates(pool)
-            self._set_prog(f"共 {len(candidates)} 只候选股，开始技术分析…", 0.15)
+
+            # 板块轮动：预先获取行业涨跌幅字典
+            sector_perf = {}
+            if strategy == "板块轮动":
+                self._set_prog("获取板块行情…", 0.12)
+                try:
+                    sdf = ak.stock_board_industry_name_em()
+                    chg_col  = next((c for c in sdf.columns if "涨跌幅" in str(c)), None)
+                    name_col = next((c for c in sdf.columns if "名称" in str(c)), sdf.columns[1])
+                    if chg_col:
+                        sdf[chg_col] = pd.to_numeric(sdf[chg_col], errors="coerce").fillna(0)
+                        sector_perf = dict(zip(sdf[name_col], sdf[chg_col]))
+                except Exception:
+                    pass
+
+            self._set_prog(f"共 {len(candidates)} 只候选股，策略「{strategy}」开始分析…", 0.15)
 
             results = []
             done    = [0]
 
             def analyze(code, name):
-                res = self._score_stock(code, name, uptrend, min_score, hist_days)
+                res = self._score_stock(code, name, uptrend, min_score, hist_days,
+                                        strategy=strategy, sector_perf=sector_perf)
                 done[0] += 1
                 self._set_prog(
                     f"技术分析 {done[0]}/{len(candidates)}…",
@@ -273,7 +327,8 @@ class PredictPage(ctk.CTkFrame):
             return None, None
 
     # ── 单股评分 ─────────────────────────────────────────────────────────
-    def _score_stock(self, code, name, market_uptrend, min_score=7, hist_days=365):
+    def _score_stock(self, code, name, market_uptrend, min_score=7, hist_days=365,
+                     strategy="追势", sector_perf=None):
         try:
             df = get_stock_hist(code, days=max(hist_days, 90))
             if len(df) < 30:
@@ -301,40 +356,171 @@ class PredictPage(ctk.CTkFrame):
 
             vol_ma20 = volume.rolling(20).mean().iloc[-1]
             vr       = volume.iloc[-1] / vol_ma20 if vol_ma20 > 0 else 1
+            m5, m10, m20, m60 = ma5.iloc[-1], ma10.iloc[-1], ma20.iloc[-1], ma60.iloc[-1]
 
             score   = 0
             reasons = []
 
-            m5, m10, m20, m60 = ma5.iloc[-1], ma10.iloc[-1], ma20.iloc[-1], ma60.iloc[-1]
-            if cur > m5 > m10 > m20 > m60:
-                score += 3; reasons.append("均线完全多头")
-            elif cur > m5 > m10 > m20:
-                score += 2; reasons.append("均线多头排列")
-            elif cur > m20:
-                score += 1; reasons.append("站上MA20")
+            # ── 策略 A: 追势（原始逻辑） ─────────────────────────────────
+            if strategy == "追势":
+                if cur > m5 > m10 > m20 > m60:
+                    score += 3; reasons.append("均线完全多头")
+                elif cur > m5 > m10 > m20:
+                    score += 2; reasons.append("均线多头排列")
+                elif cur > m20:
+                    score += 1; reasons.append("站上MA20")
 
-            if macd.iloc[-2] < signal.iloc[-2] and macd.iloc[-1] > signal.iloc[-1]:
-                score += 2; reasons.append("MACD金叉")
-            elif macd.iloc[-1] > signal.iloc[-1] and hist.iloc[-1] > hist.iloc[-2] > 0:
-                score += 2; reasons.append("MACD红柱扩张")
-            elif macd.iloc[-1] > signal.iloc[-1]:
-                score += 1; reasons.append("MACD多头")
+                if macd.iloc[-2] < signal.iloc[-2] and macd.iloc[-1] > signal.iloc[-1]:
+                    score += 2; reasons.append("MACD金叉")
+                elif macd.iloc[-1] > signal.iloc[-1] and hist.iloc[-1] > hist.iloc[-2] > 0:
+                    score += 2; reasons.append("MACD红柱扩张")
+                elif macd.iloc[-1] > signal.iloc[-1]:
+                    score += 1; reasons.append("MACD多头")
 
-            if 45 <= rsi <= 65:
-                score += 2; reasons.append(f"RSI健康 {rsi:.0f}")
-            elif 35 <= rsi < 45:
-                score += 1; reasons.append(f"RSI回升 {rsi:.0f}")
-            elif 65 < rsi <= 75:
-                score += 1; reasons.append(f"RSI强势 {rsi:.0f}")
+                if 45 <= rsi <= 65:
+                    score += 2; reasons.append(f"RSI健康 {rsi:.0f}")
+                elif 35 <= rsi < 45:
+                    score += 1; reasons.append(f"RSI回升 {rsi:.0f}")
+                elif 65 < rsi <= 75:
+                    score += 1; reasons.append(f"RSI强势 {rsi:.0f}")
 
-            if vr >= 2.0:
-                score += 2; reasons.append(f"大幅放量 {vr:.1f}x")
-            elif vr >= 1.4:
-                score += 1; reasons.append(f"温和放量 {vr:.1f}x")
+                if vr >= 2.0:
+                    score += 2; reasons.append(f"大幅放量 {vr:.1f}x")
+                elif vr >= 1.4:
+                    score += 1; reasons.append(f"温和放量 {vr:.1f}x")
 
-            up_days = int((close.pct_change().iloc[-5:] > 0).sum())
-            if up_days >= 3:
-                score += 1; reasons.append(f"近5日{up_days}涨")
+                up_days = int((close.pct_change().iloc[-5:] > 0).sum())
+                if up_days >= 3:
+                    score += 1; reasons.append(f"近5日{up_days}涨")
+
+            # ── 策略 B: 蓝筹过滤超涨 ────────────────────────────────────
+            elif strategy == "蓝筹过滤超涨":
+                # 过滤已飞涨的股票
+                gain_5d = (cur - close.iloc[-6]) / close.iloc[-6] * 100 if len(close) > 5 else 0
+                if gain_5d > 15:
+                    return None
+                if rsi > 72:
+                    return None
+
+                if cur > m5 > m10 > m20 > m60:
+                    score += 3; reasons.append("均线完全多头")
+                elif cur > m5 > m10 > m20:
+                    score += 2; reasons.append("均线多头排列")
+                elif cur > m20:
+                    score += 1; reasons.append("站上MA20")
+
+                if macd.iloc[-2] < signal.iloc[-2] and macd.iloc[-1] > signal.iloc[-1]:
+                    score += 2; reasons.append("MACD金叉")
+                elif macd.iloc[-1] > signal.iloc[-1] and hist.iloc[-1] > hist.iloc[-2] > 0:
+                    score += 2; reasons.append("MACD红柱扩张")
+                elif macd.iloc[-1] > signal.iloc[-1]:
+                    score += 1; reasons.append("MACD多头")
+
+                # RSI 上限更严格，不奖励强势区
+                if 45 <= rsi <= 62:
+                    score += 2; reasons.append(f"RSI健康 {rsi:.0f}")
+                elif 35 <= rsi < 45:
+                    score += 1; reasons.append(f"RSI回升 {rsi:.0f}")
+
+                # 量能：偏好适度放量，不追极端
+                if 1.4 <= vr < 3.0:
+                    score += 2; reasons.append(f"适度放量 {vr:.1f}x")
+                elif vr >= 3.0:
+                    score += 1; reasons.append(f"放量(偏高) {vr:.1f}x")
+
+                up_days = int((close.pct_change().iloc[-5:] > 0).sum())
+                if up_days >= 3:
+                    score += 1; reasons.append(f"近5日{up_days}涨")
+
+                reasons.append(f"5日涨幅 {gain_5d:+.1f}%")
+
+            # ── 策略 C: 均值回归 ─────────────────────────────────────────
+            elif strategy == "均值回归":
+                # 要求中期趋势完好
+                if m20 <= m60:
+                    return None  # 中期下跌，不做回归
+
+                # 短期回调幅度判断
+                pullback = (cur - m20) / m20 * 100  # 负值 = 在MA20下方
+                if -8 <= pullback <= -1:
+                    score += 3; reasons.append(f"健康回调 {pullback:.1f}%")
+                elif -15 <= pullback < -8:
+                    score += 2; reasons.append(f"深度回调 {pullback:.1f}%")
+                elif 0 < pullback <= 3:
+                    score += 1; reasons.append("刚回到MA20上方")
+                else:
+                    return None  # 离MA20太远（过远超涨或深度下跌）
+
+                # RSI 超卖回升 — 核心信号
+                if 32 <= rsi <= 48:
+                    score += 3; reasons.append(f"RSI超卖回升 {rsi:.0f}")
+                elif 48 < rsi <= 55:
+                    score += 2; reasons.append(f"RSI中性偏低 {rsi:.0f}")
+                elif rsi < 32:
+                    score += 1; reasons.append(f"RSI极度超卖 {rsi:.0f}")
+                else:
+                    return None  # RSI 已过高，回归机会消失
+
+                # MACD 底部反转信号
+                if macd.iloc[-2] < signal.iloc[-2] and macd.iloc[-1] > signal.iloc[-1]:
+                    score += 2; reasons.append("MACD金叉（底部）")
+                elif macd.iloc[-1] < 0 and hist.iloc[-1] > hist.iloc[-2]:
+                    score += 2; reasons.append("MACD零轴下方反弹")
+                elif hist.iloc[-1] > hist.iloc[-2] > hist.iloc[-3]:
+                    score += 1; reasons.append("MACD柱连续缩空")
+
+                # 量能萎缩（回调健康的标志）
+                if vr < 0.8:
+                    score += 1; reasons.append(f"缩量回调 {vr:.1f}x")
+
+                # 近期触底反弹形态（先跌后涨）
+                pct5 = close.pct_change().iloc[-5:].values
+                if len(pct5) >= 3 and pct5[-1] > 0 and pct5[-2] > 0 and pct5[-3] < 0:
+                    score += 1; reasons.append("止跌反弹形态")
+
+            # ── 策略 D: 板块轮动 ─────────────────────────────────────────
+            elif strategy == "板块轮动":
+                # 先获取该股所属板块的近期涨幅
+                try:
+                    info_df  = ak.stock_individual_info_em(stock=code)
+                    info_map = dict(zip(info_df.iloc[:, 0], info_df.iloc[:, 1]))
+                    stk_sector = str(info_map.get("行业", ""))
+                except Exception:
+                    stk_sector = ""
+
+                s_chg = sector_perf.get(stk_sector, None) if sector_perf else None
+                if s_chg is not None:
+                    if s_chg > 8:
+                        return None  # 板块已经大涨，追高风险高
+                    elif s_chg < 2:
+                        score += 2; reasons.append(f"冷门板块待启动 {s_chg:+.1f}%")
+                    elif 2 <= s_chg <= 5:
+                        score += 1; reasons.append(f"板块温和上行 {s_chg:+.1f}%")
+
+                # 个股本身要有基本的多头结构
+                if cur > m10 > m20:
+                    score += 2; reasons.append("均线多头")
+                elif cur > m20:
+                    score += 1; reasons.append("站上MA20")
+                else:
+                    return None  # 个股本身趋势不行
+
+                if macd.iloc[-2] < signal.iloc[-2] and macd.iloc[-1] > signal.iloc[-1]:
+                    score += 2; reasons.append("MACD金叉")
+                elif macd.iloc[-1] > signal.iloc[-1]:
+                    score += 1; reasons.append("MACD多头")
+
+                if 40 <= rsi <= 65:
+                    score += 2; reasons.append(f"RSI适中 {rsi:.0f}")
+                elif rsi > 65:
+                    return None  # 个股已超买
+
+                if 1.2 <= vr <= 3.0:
+                    score += 1; reasons.append(f"量能配合 {vr:.1f}x")
+
+                up_days = int((close.pct_change().iloc[-5:] > 0).sum())
+                if up_days >= 2:
+                    score += 1; reasons.append(f"近5日{up_days}涨")
 
             threshold = min_score if market_uptrend else min(min_score + 1, 10)
             if score < threshold:
@@ -356,11 +542,25 @@ class PredictPage(ctk.CTkFrame):
             # 历史胜率
             win_rate, avg_ret = self._calc_winrate(df)
 
+            # 近3个交易日涨跌幅
+            pct = close.pct_change() * 100
+            chg3 = [round(pct.iloc[-i], 2) if len(pct) >= i else None for i in range(1, 4)]
+
+            # 所属板块
+            try:
+                info_df = ak.stock_individual_info_em(stock=code)
+                info    = dict(zip(info_df.iloc[:, 0], info_df.iloc[:, 1]))
+                sector  = str(info.get("行业", "—"))
+            except Exception:
+                sector = "—"
+
             return {
                 "code":        code,
                 "name":        name,
                 "price":       cur,
                 "score":       score,
+                "chg3":        chg3,
+                "sector":      sector,
                 "win_rate":    win_rate,
                 "exp_return":  avg_ret,
                 "stop_loss":   stop_loss,
@@ -392,23 +592,67 @@ class PredictPage(ctk.CTkFrame):
             text_color=YELLOW, font=ctk.CTkFont(size=11)
         ).pack(pady=(8, 2))
 
+        hdr, scroll = self._build_scroll_table(self.content)
+        for rank, item in enumerate(top10, 1):
+            self._add_row(scroll, rank, item)
+
+    # ── 可横向滚动的表格容器 ──────────────────────────────────────────────
+    def _build_scroll_table(self, parent):
+        """返回 (header_frame, rows_scrollable_frame)，支持横向+纵向滚动"""
+        outer = ctk.CTkFrame(parent, fg_color="transparent")
+        outer.pack(fill="both", expand=True, padx=10, pady=(4, 8))
+
+        # 横向滚动条（底部）
+        hbar = tk.Scrollbar(outer, orient="horizontal")
+        hbar.pack(side="bottom", fill="x")
+
+        # Canvas 负责横向平移
+        canvas = tk.Canvas(outer, bg="#1f1f2e", highlightthickness=0,
+                           xscrollcommand=hbar.set)
+        canvas.pack(fill="both", expand=True)
+        hbar.config(command=canvas.xview)
+
+        # 内部大框架（随内容宽度自动展开）
+        inner = ctk.CTkFrame(canvas, fg_color="transparent")
+        win   = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _sync(e=None):
+            rw = inner.winfo_reqwidth()
+            rh = inner.winfo_reqheight()
+            canvas.configure(scrollregion=(0, 0, rw, rh))
+            canvas.itemconfig(win, height=max(canvas.winfo_height(), rh))
+
+        inner.bind("<Configure>", _sync)
+        canvas.bind("<Configure>", lambda e: (
+            canvas.itemconfig(win, height=e.height),
+            canvas.configure(scrollregion=(0, 0,
+                                           inner.winfo_reqwidth(),
+                                           max(e.height, inner.winfo_reqheight())))
+        ))
+
+        # Shift+滚轮 → 横向；普通滚轮 → 纵向（由内部 CTkScrollableFrame 处理）
+        canvas.bind("<MouseWheel>", lambda e: (
+            canvas.xview_scroll(int(-1 * (e.delta / 120)), "units")
+            if (e.state & 0x1) else None
+        ))
+
         # 表头
-        hdr = ctk.CTkFrame(self.content, fg_color=("gray25", "gray20"), corner_radius=4)
-        hdr.pack(fill="x", padx=10, pady=(4, 0))
+        hdr = ctk.CTkFrame(inner, fg_color=("gray25", "gray20"), corner_radius=4)
+        hdr.pack(fill="x", pady=(0, 1))
         for i, w in enumerate(WIDTHS):
-            hdr.columnconfigure(i, weight=1 if w == 1 else 0, minsize=max(w, 10))
-        for i, (col, w) in enumerate(zip(COLS, WIDTHS)):
+            hdr.columnconfigure(i, weight=0, minsize=w)
+        for i, col in enumerate(COLS):
             ctk.CTkLabel(hdr, text=col, text_color=GRAY,
                          font=ctk.CTkFont(size=11, weight="bold"),
                          anchor="w").grid(row=0, column=i, padx=6, pady=5, sticky="w")
 
-        scroll = ctk.CTkScrollableFrame(self.content, fg_color="transparent")
-        scroll.pack(fill="both", expand=True, padx=10, pady=(2, 8))
+        # 行区域（纵向可滚动）
+        rows = ctk.CTkScrollableFrame(inner, fg_color="transparent")
+        rows.pack(fill="both", expand=True)
         for i, w in enumerate(WIDTHS):
-            scroll.columnconfigure(i, weight=1 if w == 1 else 0, minsize=max(w, 10))
+            rows.columnconfigure(i, weight=0, minsize=w)
 
-        for rank, item in enumerate(top10, 1):
-            self._add_row(scroll, rank, item)
+        return hdr, rows
 
     def _add_row(self, parent, rank, item):
         bg    = ("gray20", "gray16") if rank % 2 == 0 else ("gray18", "gray13")
@@ -430,17 +674,29 @@ class PredictPage(ctk.CTkFrame):
                     RED if wr else GRAY)
         er_color = GREEN if er and er > 0 else (RED if er and er < 0 else GRAY)
 
+        def chg_fmt(v):
+            if v is None: return "—", GRAY
+            return f"{v:+.2f}%", (GREEN if v > 0 else RED if v < 0 else GRAY)
+
+        c1, c1c = chg_fmt(item.get("chg3", [None, None, None])[0])
+        c2, c2c = chg_fmt(item.get("chg3", [None, None, None])[1])
+        c3, c3c = chg_fmt(item.get("chg3", [None, None, None])[2])
+
         cells = [
             (str(rank),                     "white"),
             (item["code"],                  BLUE),
             (item["name"],                  "white"),
             (f"¥{item['price']:.2f}",       "white"),
+            (c1,                            c1c),
+            (c2,                            c2c),
+            (c3,                            c3c),
             (f"{s} 分",                     sc),
             (wr_txt,                        wr_color),
             (er_txt,                        er_color),
             (f"¥{item['stop_loss']:.2f}",   RED),
             (f"¥{item['take_profit']:.2f}", GREEN),
             (f"{rr}:1",                     GREEN if rr >= 2.5 else YELLOW),
+            (item.get("sector", "—"),       YELLOW),
             (item["reasons"],               GRAY),
         ]
         for col, (text, color) in enumerate(cells):
@@ -488,16 +744,24 @@ class PredictPage(ctk.CTkFrame):
             return
 
         # 列名适配
-        title_col = next((c for c in df.columns if "标题" in str(c) or "title" in str(c).lower()), None)
-        time_col  = next((c for c in df.columns if "时间" in str(c) or "date" in str(c).lower() or "发布" in str(c)), None)
-        url_col   = next((c for c in df.columns
-                          if "链接" in str(c) or "url" in str(c).lower()), None)
+        title_col   = next((c for c in df.columns if "标题" in str(c) or "title" in str(c).lower()), None)
+        time_col    = next((c for c in df.columns if "时间" in str(c) or "date" in str(c).lower() or "发布" in str(c)), None)
+        url_col     = next((c for c in df.columns if "链接" in str(c) or "url" in str(c).lower()), None)
+        content_col = next((c for c in df.columns if "内容" in str(c) or "摘要" in str(c) or "content" in str(c).lower() or "summary" in str(c).lower()), None)
 
         shown = df.head(15)
         for _, row in shown.iterrows():
-            title = str(row[title_col]) if title_col else str(row.iloc[0])
-            ts    = str(row[time_col])[:16] if time_col else ""
-            url   = str(row[url_col]) if url_col else None
+            title   = str(row[title_col])   if title_col   else str(row.iloc[0])
+            ts      = str(row[time_col])[:16] if time_col  else ""
+            url     = str(row[url_col])     if url_col     else None
+            content = str(row[content_col]) if content_col else ""
+            # 清理摘要：去掉与标题重复的开头、截断到合理长度
+            if content and content not in ("nan", "None", ""):
+                if content.startswith(title[:20]):
+                    content = content[len(title):].lstrip("。，、 ")
+                summary = content[:200] + ("…" if len(content) > 200 else "")
+            else:
+                summary = ""
 
             card = ctk.CTkFrame(self.news_scroll,
                                 fg_color=("gray22", "gray17"), corner_radius=6)
@@ -520,9 +784,18 @@ class PredictPage(ctk.CTkFrame):
                              corner_radius=4).pack(side="right", padx=4)
 
             title_lbl = ctk.CTkLabel(card, text=title, text_color="white",
-                                     font=ctk.CTkFont(size=11),
+                                     font=ctk.CTkFont(size=11, weight="bold"),
                                      wraplength=700, justify="left", anchor="w")
-            title_lbl.pack(fill="x", padx=10, pady=(0, 6))
+            title_lbl.pack(fill="x", padx=10, pady=(0, 2))
+
+            if summary:
+                ctk.CTkLabel(card, text=summary, text_color="gray70",
+                             font=ctk.CTkFont(size=10),
+                             wraplength=700, justify="left", anchor="w").pack(
+                    fill="x", padx=10, pady=(0, 8))
+            else:
+                card.pack_configure()  # no extra padding needed
+                title_lbl.pack_configure(pady=(0, 8))
 
             if url and url.startswith("http"):
                 card.configure(cursor="hand2")

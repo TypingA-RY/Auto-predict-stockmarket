@@ -9,7 +9,9 @@ from gui.sector_page import SectorPage
 from gui.probability_page import ProbabilityPage
 from gui.predict_page import PredictPage
 from gui.weak_page import WeakPage
+from gui.review_page import ReviewPage
 from gui.detail_page import DetailPage
+from gui.ccass_page import CCASSPage
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -21,7 +23,9 @@ NAV_ITEMS = [
     ("涨跌概率",  ProbabilityPage),
     ("次日预测",  PredictPage),
     ("弱势预警",  WeakPage),
+    ("历史复盘",  ReviewPage),
     ("个股详情",  DetailPage),
+    ("CCASS持仓", CCASSPage),
 ]
 
 
